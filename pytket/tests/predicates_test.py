@@ -1274,3 +1274,40 @@ def test_zx_vertex_reuse() -> None:
     ZXGraphlikeOptimisation(allow_swaps=False).apply(c)
     u1 = c.get_unitary()
     assert compare_unitaries(u0, u1)
+
+
+def test_greedy_pauli_synth_nested_conditional() -> None:
+    # https://github.com/Quantinuum/tket/issues/2237
+    c = Circuit(1, 2)
+    cond0 = Conditional(Op.create(OpType.X), 1, 0)  # apply X if bits are [0]
+    cond1 = Conditional(cond0, 1, 1)  # apply cond0 if bits are [1]
+    c.add_gate(cond1, [Bit(0), Bit(1), Qubit(0)])  # apply X if bits are [1,0]
+    GreedyPauliSimp().apply(c)
+    cmd = c.get_commands()[0]
+    args = cmd.args
+    op = cmd.op
+    assert args == [Bit(0), Bit(1), Qubit(0)]
+    assert isinstance(op, Conditional)
+    assert op.op.type == OpType.X
+    assert op.width == 2
+    assert op.value == 1  # little-endian
+
+    # A more complex and deeply nested example
+    c = Circuit(1, 7)
+    cond0 = Conditional(Op.create(OpType.X), 1, 1)  # apply X if bits are [1]
+    cond1 = Conditional(cond0, 1, 1)  # apply cond0 if bits are [1]
+    cond2 = Conditional(cond1, 2, 3)  # apply cond1 if bits are [1,1]
+    cond3 = Conditional(cond2, 1, 0)  # apply cond2 if bits are [0]
+    cond4 = Conditional(cond3, 2, 2)  # apply cond3 if bits are [0,1]
+    c.add_gate(
+        cond4, [Bit(i) for i in range(7)] + [Qubit(0)]
+    )  # apply X if bits are [0,1,0,1,1,1,1]
+    GreedyPauliSimp().apply(c)
+    cmd = c.get_commands()[0]
+    args = cmd.args
+    op = cmd.op
+    assert args == [Bit(i) for i in range(7)] + [Qubit(0)]
+    assert isinstance(op, Conditional)
+    assert op.op.type == OpType.X
+    assert op.width == 7
+    assert op.value == 122  # little-endian
